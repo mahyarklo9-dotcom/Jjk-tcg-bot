@@ -1,6 +1,5 @@
 import sqlite3
 import random
-import time
 
 DB_NAME = "tcg.db"
 
@@ -9,9 +8,6 @@ def get_connection():
     return sqlite3.connect(DB_NAME)
 
 
-# =========================
-# INIT TABLES
-# =========================
 def init_db():
     db = get_connection()
     cur = db.cursor()
@@ -44,7 +40,7 @@ def init_db():
     cur.execute("""
     CREATE TABLE IF NOT EXISTS cooldown(
         user_id INTEGER PRIMARY KEY,
-        last_time INTEGER
+        last_time INTEGER DEFAULT 0
     )
     """)
 
@@ -55,16 +51,21 @@ def init_db():
 # =========================
 # USERS
 # =========================
+
 def register_user(user_id):
     db = get_connection()
     cur = db.cursor()
 
-    cur.execute("SELECT points FROM users WHERE user_id=?", (user_id,))
+    cur.execute(
+        "SELECT points FROM users WHERE user_id=?",
+        (user_id,)
+    )
+
     row = cur.fetchone()
 
     if row:
         db.close()
-        return row[0]
+        return int(row[0])
 
     points = random.randint(30, 120)
 
@@ -83,23 +84,38 @@ def get_points(user_id):
     db = get_connection()
     cur = db.cursor()
 
-    cur.execute("SELECT points FROM users WHERE user_id=?", (user_id,))
+    cur.execute(
+        "SELECT points FROM users WHERE user_id=?",
+        (user_id,)
+    )
+
     row = cur.fetchone()
 
     db.close()
 
-    return row[0] if row and row[0] is not None else 0
+    if row is None:
+        return 0
+
+    return int(row[0])
 
 
 def add_points(user_id, amount):
+    register_user(user_id)
+
     db = get_connection()
     cur = db.cursor()
 
-    cur.execute("""
-    INSERT INTO users(user_id, points)
-    VALUES(?,?)
-    ON CONFLICT(user_id) DO UPDATE SET points = points + ?
-    """, (user_id, amount, amount))
+    current = get_points(user_id)
+
+    new_points = current + amount
+
+    if new_points < 0:
+        new_points = 0
+
+    cur.execute(
+        "UPDATE users SET points=? WHERE user_id=?",
+        (new_points, user_id)
+    )
 
     db.commit()
     db.close()
@@ -112,6 +128,7 @@ def remove_points(user_id, amount):
 # =========================
 # CARDS
 # =========================
+
 def add_unopened_card(user_id, name, img):
     db = get_connection()
     cur = db.cursor()
@@ -130,7 +147,7 @@ def get_next_unopened(user_id):
     cur = db.cursor()
 
     cur.execute("""
-    SELECT id, user_id, card_name, image_file
+    SELECT id,user_id,card_name,image_file
     FROM unopened_cards
     WHERE user_id=?
     ORDER BY id ASC
@@ -138,6 +155,7 @@ def get_next_unopened(user_id):
     """, (user_id,))
 
     row = cur.fetchone()
+
     db.close()
     return row
 
@@ -147,7 +165,7 @@ def move_card_to_inventory(card_id):
     cur = db.cursor()
 
     cur.execute("""
-    SELECT user_id, card_name, image_file
+    SELECT user_id,card_name,image_file
     FROM unopened_cards
     WHERE id=?
     """, (card_id,))
@@ -159,11 +177,14 @@ def move_card_to_inventory(card_id):
         return
 
     cur.execute("""
-    INSERT INTO inventory(user_id, card_name, image_file)
+    INSERT INTO inventory(user_id,card_name,image_file)
     VALUES(?,?,?)
     """, card)
 
-    cur.execute("DELETE FROM unopened_cards WHERE id=?", (card_id,))
+    cur.execute(
+        "DELETE FROM unopened_cards WHERE id=?",
+        (card_id,)
+    )
 
     db.commit()
     db.close()
@@ -173,9 +194,10 @@ def unopened_count(user_id):
     db = get_connection()
     cur = db.cursor()
 
-    cur.execute("""
-    SELECT COUNT(*) FROM unopened_cards WHERE user_id=?
-    """, (user_id,))
+    cur.execute(
+        "SELECT COUNT(*) FROM unopened_cards WHERE user_id=?",
+        (user_id,)
+    )
 
     count = cur.fetchone()[0]
 
@@ -188,7 +210,9 @@ def get_inventory(user_id):
     cur = db.cursor()
 
     cur.execute("""
-    SELECT card_name FROM inventory WHERE user_id=?
+    SELECT id,card_name,image_file
+    FROM inventory
+    WHERE user_id=?
     """, (user_id,))
 
     rows = cur.fetchall()
@@ -202,7 +226,8 @@ def get_card_by_name(user_id, name):
     cur = db.cursor()
 
     cur.execute("""
-    SELECT id FROM inventory
+    SELECT id
+    FROM inventory
     WHERE user_id=? AND card_name=?
     LIMIT 1
     """, (user_id, name))
@@ -227,14 +252,49 @@ def transfer_card(card_id, from_user, to_user):
     db.close()
 
 
+def sell_card(user_id, card_name, price):
+    db = get_connection()
+    cur = db.cursor()
+
+    cur.execute("""
+    SELECT id
+    FROM inventory
+    WHERE user_id=? AND card_name=?
+    LIMIT 1
+    """, (user_id, card_name))
+
+    row = cur.fetchone()
+
+    if not row:
+        db.close()
+        return False
+
+    cur.execute(
+        "DELETE FROM inventory WHERE id=?",
+        (row[0],)
+    )
+
+    db.commit()
+    db.close()
+
+    add_points(user_id, price)
+
+    return True
+
+
 # =========================
 # CHANS
 # =========================
+
 def get_last_chans(user_id):
     db = get_connection()
     cur = db.cursor()
 
-    cur.execute("SELECT last_time FROM cooldown WHERE user_id=?", (user_id,))
+    cur.execute(
+        "SELECT last_time FROM cooldown WHERE user_id=?",
+        (user_id,)
+    )
+
     row = cur.fetchone()
 
     db.close()
@@ -247,9 +307,10 @@ def set_last_chans(user_id, t):
     cur = db.cursor()
 
     cur.execute("""
-    INSERT INTO cooldown(user_id, last_time)
+    INSERT INTO cooldown(user_id,last_time)
     VALUES(?,?)
-    ON CONFLICT(user_id) DO UPDATE SET last_time=excluded.last_time
+    ON CONFLICT(user_id)
+    DO UPDATE SET last_time=excluded.last_time
     """, (user_id, t))
 
     db.commit()
