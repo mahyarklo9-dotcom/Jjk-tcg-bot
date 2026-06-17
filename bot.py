@@ -20,7 +20,7 @@ from cards import CARDS, BASE_PATH
 TOKEN = os.getenv("TOKEN")
 
 if not TOKEN:
-    raise ValueError("TOKEN is not set in environment variables")
+    raise ValueError("TOKEN is not set")
 
 bot = Bot(token=TOKEN)
 dp = Dispatcher()
@@ -34,48 +34,6 @@ sell_states = {}
 trade_states = {}
 inv_states = {}
 inv_index = {}
-
-
-# =========================
-# START
-# =========================
-
-@dp.message(Command("start"))
-async def start(message: Message):
-
-    uid = message.from_user.id
-    points = register_user(uid)
-
-    await message.answer(
-        f"""
-🎴 JJK TCG ONLINE
-
-💰 امتیاز: {points}
-
-/help
-"""
-    )
-
-
-# =========================
-# HELP
-# =========================
-
-@dp.message(Command("help"))
-async def help_cmd(message: Message):
-
-    await message.answer(
-        """
-📌 دستورات:
-
-/inv - گالری کارت‌ها
-/shop - خرید پک
-/open - باز کردن کارت
-/sell - فروش دستی
-/trade - انتقال کارت
-/help_trade - راهنما معامله
-"""
-    )
 
 
 # =========================
@@ -119,11 +77,11 @@ async def inventory(message: Message):
 
 
 # =========================
-# NAVIGATION (SAFE VERSION)
+# NEXT
 # =========================
 
-@dp.callback_query(F.data.startswith("inv_"))
-async def inv_nav(callback: CallbackQuery):
+@dp.callback_query(F.data.startswith("inv_next_"))
+async def inv_next(callback: CallbackQuery):
 
     uid = callback.from_user.id
 
@@ -132,27 +90,15 @@ async def inv_nav(callback: CallbackQuery):
         return
 
     cards = inv_states[uid]
+    index = int(callback.data.split("_")[-1])
 
-    try:
-        _, action, index = callback.data.split("_")
-        index = int(index)
-    except:
-        await callback.answer("خطا")
-        return
-
-    if action == "next":
-        index += 1
-    else:
-        index -= 1
-
-    if index < 0:
-        index = len(cards) - 1
+    index += 1
     if index >= len(cards):
         index = 0
 
     inv_index[uid] = index
-
     card = cards[index]
+
     image_path = os.path.join(BASE_PATH, card[2])
 
     keyboard = InlineKeyboardMarkup(
@@ -168,7 +114,6 @@ async def inv_nav(callback: CallbackQuery):
         ]
     )
 
-    # 🔥 نسخه کاملاً پایدار (بدون edit_media)
     await callback.message.delete()
 
     await callback.message.answer_photo(
@@ -181,7 +126,56 @@ async def inv_nav(callback: CallbackQuery):
 
 
 # =========================
-# SELL FROM GALLERY
+# PREV
+# =========================
+
+@dp.callback_query(F.data.startswith("inv_prev_"))
+async def inv_prev(callback: CallbackQuery):
+
+    uid = callback.from_user.id
+
+    if uid not in inv_states:
+        await callback.answer("منقضی شد")
+        return
+
+    cards = inv_states[uid]
+    index = int(callback.data.split("_")[-1])
+
+    index -= 1
+    if index < 0:
+        index = len(cards) - 1
+
+    inv_index[uid] = index
+    card = cards[index]
+
+    image_path = os.path.join(BASE_PATH, card[2])
+
+    keyboard = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(text="⬅️", callback_data=f"inv_prev_{index}"),
+                InlineKeyboardButton(text="➡️", callback_data=f"inv_next_{index}")
+            ],
+            [
+                InlineKeyboardButton(text="🗑 فروش", callback_data="inv_sell"),
+                InlineKeyboardButton(text="🎁 انتقال", callback_data="inv_trade")
+            ]
+        ]
+    )
+
+    await callback.message.delete()
+
+    await callback.message.answer_photo(
+        FSInputFile(image_path),
+        caption=f"🎴 {card[1]}\n\n📊 {index+1} / {len(cards)}",
+        reply_markup=keyboard
+    )
+
+    await callback.answer()
+
+
+# =========================
+# SELL
 # =========================
 
 @dp.callback_query(F.data == "inv_sell")
@@ -203,20 +197,14 @@ async def inv_sell(callback: CallbackQuery):
     }
 
     await callback.message.answer(
-        f"""
-🗑 فروش کارت
-
-🎴 {card[1]}
-
-💰 قیمت را وارد کن:
-"""
+        f"🗑 فروش:\n🎴 {card[1]}\n💰 قیمت را وارد کن:"
     )
 
     await callback.answer()
 
 
 # =========================
-# TRADE FROM GALLERY
+# TRADE
 # =========================
 
 @dp.callback_query(F.data == "inv_trade")
@@ -238,20 +226,14 @@ async def inv_trade(callback: CallbackQuery):
     }
 
     await callback.message.answer(
-        f"""
-🎁 انتقال کارت
-
-🎴 {card[1]}
-
-👤 ID خریدار را وارد کن:
-"""
+        f"🎁 انتقال:\n🎴 {card[1]}\n👤 ID را وارد کن:"
     )
 
     await callback.answer()
 
 
 # =========================
-# SELL FLOW
+# FLOW (SELL + TRADE)
 # =========================
 
 @dp.message()
@@ -273,7 +255,6 @@ async def flow(message: Message):
                 return
 
             sell_card(uid, state["card_name"], price)
-
             del sell_states[uid]
 
             await message.answer("✅ فروخته شد")
