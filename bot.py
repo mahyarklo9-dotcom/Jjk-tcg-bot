@@ -9,8 +9,7 @@ from aiogram.types import (
     FSInputFile,
     CallbackQuery,
     InlineKeyboardMarkup,
-    InlineKeyboardButton,
-    InputMediaPhoto
+    InlineKeyboardButton
 )
 from aiogram.filters import Command
 
@@ -19,6 +18,9 @@ from cards import CARDS, BASE_PATH
 
 
 TOKEN = os.getenv("TOKEN")
+
+if not TOKEN:
+    raise ValueError("TOKEN is not set in environment variables")
 
 bot = Bot(token=TOKEN)
 dp = Dispatcher()
@@ -31,7 +33,49 @@ dp = Dispatcher()
 sell_states = {}
 trade_states = {}
 inv_states = {}
-inv_index = {}   # ✅ اضافه شد (برای تشخیص کارت فعلی)
+inv_index = {}
+
+
+# =========================
+# START
+# =========================
+
+@dp.message(Command("start"))
+async def start(message: Message):
+
+    uid = message.from_user.id
+    points = register_user(uid)
+
+    await message.answer(
+        f"""
+🎴 JJK TCG ONLINE
+
+💰 امتیاز: {points}
+
+/help
+"""
+    )
+
+
+# =========================
+# HELP
+# =========================
+
+@dp.message(Command("help"))
+async def help_cmd(message: Message):
+
+    await message.answer(
+        """
+📌 دستورات:
+
+/inv - گالری کارت‌ها
+/shop - خرید پک
+/open - باز کردن کارت
+/sell - فروش دستی
+/trade - انتقال کارت
+/help_trade - راهنما معامله
+"""
+    )
 
 
 # =========================
@@ -45,11 +89,11 @@ async def inventory(message: Message):
     cards = get_inventory(uid)
 
     if not cards:
-        await message.answer("🎒 خالی است")
+        await message.answer("🎒 اینونتوری خالی است")
         return
 
     inv_states[uid] = cards
-    inv_index[uid] = 0   # ✅ کارت فعلی
+    inv_index[uid] = 0
 
     card = cards[0]
     image_path = os.path.join(BASE_PATH, card[2])
@@ -75,7 +119,7 @@ async def inventory(message: Message):
 
 
 # =========================
-# NAVIGATION
+# NAVIGATION (SAFE VERSION)
 # =========================
 
 @dp.callback_query(F.data.startswith("inv_"))
@@ -89,8 +133,12 @@ async def inv_nav(callback: CallbackQuery):
 
     cards = inv_states[uid]
 
-    _, action, index = callback.data.split("_")
-    index = int(index)
+    try:
+        _, action, index = callback.data.split("_")
+        index = int(index)
+    except:
+        await callback.answer("خطا")
+        return
 
     if action == "next":
         index += 1
@@ -102,7 +150,7 @@ async def inv_nav(callback: CallbackQuery):
     if index >= len(cards):
         index = 0
 
-    inv_index[uid] = index   # ✅ ذخیره کارت فعلی
+    inv_index[uid] = index
 
     card = cards[index]
     image_path = os.path.join(BASE_PATH, card[2])
@@ -120,19 +168,20 @@ async def inv_nav(callback: CallbackQuery):
         ]
     )
 
-    await callback.message.edit_media(
-    media=InputMediaPhoto(
-        media=image_path,
-        caption=f"🎴 {card[1]}\n\n📊 {index+1} / {len(cards)}"
-    ),
-    reply_markup=keyboard
+    # 🔥 نسخه کاملاً پایدار (بدون edit_media)
+    await callback.message.delete()
+
+    await callback.message.answer_photo(
+        FSInputFile(image_path),
+        caption=f"🎴 {card[1]}\n\n📊 {index+1} / {len(cards)}",
+        reply_markup=keyboard
     )
 
     await callback.answer()
 
 
 # =========================
-# 🗑 SELL (FIXED VERSION)
+# SELL FROM GALLERY
 # =========================
 
 @dp.callback_query(F.data == "inv_sell")
@@ -145,7 +194,7 @@ async def inv_sell(callback: CallbackQuery):
         await callback.answer("منقضی شد")
         return
 
-    index = inv_index.get(uid, 0)   # ✅ کارت فعلی گالری
+    index = inv_index.get(uid, 0)
     card = cards[index]
 
     sell_states[uid] = {
@@ -154,14 +203,20 @@ async def inv_sell(callback: CallbackQuery):
     }
 
     await callback.message.answer(
-        f"🗑 فروش کارت:\n🎴 {card[1]}\n\n💰 قیمت را وارد کن:"
+        f"""
+🗑 فروش کارت
+
+🎴 {card[1]}
+
+💰 قیمت را وارد کن:
+"""
     )
 
     await callback.answer()
 
 
 # =========================
-# 🎁 TRADE (FIXED VERSION)
+# TRADE FROM GALLERY
 # =========================
 
 @dp.callback_query(F.data == "inv_trade")
@@ -174,7 +229,7 @@ async def inv_trade(callback: CallbackQuery):
         await callback.answer("منقضی شد")
         return
 
-    index = inv_index.get(uid, 0)   # ✅ کارت فعلی
+    index = inv_index.get(uid, 0)
     card = cards[index]
 
     trade_states[uid] = {
@@ -183,7 +238,105 @@ async def inv_trade(callback: CallbackQuery):
     }
 
     await callback.message.answer(
-        f"🎁 انتقال کارت:\n🎴 {card[1]}\n\n👤 ID خریدار را وارد کن:"
+        f"""
+🎁 انتقال کارت
+
+🎴 {card[1]}
+
+👤 ID خریدار را وارد کن:
+"""
     )
 
     await callback.answer()
+
+
+# =========================
+# SELL FLOW
+# =========================
+
+@dp.message()
+async def flow(message: Message):
+
+    uid = message.from_user.id
+
+    # SELL
+    if uid in sell_states:
+
+        state = sell_states[uid]
+
+        if state["step"] == "price":
+
+            try:
+                price = int(message.text)
+            except:
+                await message.answer("❌ فقط عدد")
+                return
+
+            sell_card(uid, state["card_name"], price)
+
+            del sell_states[uid]
+
+            await message.answer("✅ فروخته شد")
+            return
+
+    # TRADE
+    if uid in trade_states:
+
+        state = trade_states[uid]
+
+        if state["step"] == "buyer":
+
+            try:
+                state["buyer"] = int(message.text)
+            except:
+                await message.answer("❌ ID اشتباه")
+                return
+
+            state["step"] = "price"
+            await message.answer("💰 قیمت؟")
+            return
+
+        if state["step"] == "price":
+
+            try:
+                price = int(message.text)
+            except:
+                await message.answer("❌ قیمت نامعتبر")
+                return
+
+            buyer = state["buyer"]
+
+            if get_points(buyer) < price:
+                del trade_states[uid]
+                await message.answer("❌ پول کافی نیست")
+                return
+
+            card = get_card_by_name(uid, state["card_name"])
+
+            if not card:
+                del trade_states[uid]
+                await message.answer("❌ کارت نیست")
+                return
+
+            remove_points(buyer, price)
+            add_points(uid, price)
+            transfer_card(card[0], uid, buyer)
+
+            del trade_states[uid]
+
+            await message.answer("✅ معامله انجام شد")
+            return
+
+
+# =========================
+# RUN
+# =========================
+
+async def main():
+    init_db()
+    print("Bot started...")
+    await dp.start_polling(bot)
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
