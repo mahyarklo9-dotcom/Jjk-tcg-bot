@@ -37,7 +37,17 @@ async def start(message: Message):
         f"🎴 JJK TCG ONLINE\n\n💰 Points: {points}",
         reply_markup=keyboard
     )
+@dp.message(Command("debug"))
+async def debug(message: Message):
 
+    uid = message.from_user.id
+
+    points = get_points(uid)
+
+    await message.answer(
+        f"User ID: {uid}\n"
+        f"Points in DB: {points}"
+    )
 
 # =========================
 # HELP
