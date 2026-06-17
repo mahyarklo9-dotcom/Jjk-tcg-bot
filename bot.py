@@ -1,28 +1,17 @@
 import asyncio
 import random
 import os
+import time
 
 from aiogram import Bot, Dispatcher
 from aiogram.types import Message, FSInputFile
 from aiogram.filters import Command
 
-from db import (
-    register_user,
-    get_points,
-    remove_points,
-    add_unopened_card,
-    get_next_unopened,
-    move_card_to_inventory,
-    get_inventory,
-    unopened_count
-)
+from db import *
 
 from cards import CARDS, BASE_PATH
 
 
-# =========================
-# TOKEN (Railway)
-# =========================
 TOKEN = os.getenv("TOKEN")
 
 bot = Bot(token=TOKEN)
@@ -33,24 +22,19 @@ dp = Dispatcher()
 # START
 # =========================
 @dp.message(Command("start"))
-async def start_cmd(message: Message):
+async def start(message: Message):
 
     user_id = message.from_user.id
     points = register_user(user_id)
 
     if points is None:
         points = get_points(user_id)
-        await message.answer(
-            "👋 خوش برگشتی به TCG جوجوتسو\n\n"
-            f"💰 امتیاز فعلی: {points}\n\n"
-            "📖 برای راهنما /help"
-        )
-    else:
-        await message.answer(
-            "🎉 خوش آمدی!\n\n"
-            f"🎁 امتیاز اولیه: {points}\n\n"
-            "📖 برای شروع /help"
-        )
+
+    await message.answer(
+        f"🎴 TCG JJK Bot\n\n"
+        f"💰 امتیاز: {points}\n"
+        f"📖 /help"
+    )
 
 
 # =========================
@@ -60,12 +44,14 @@ async def start_cmd(message: Message):
 async def help_cmd(message: Message):
 
     await message.answer(
-        "📖 راهنمای ربات TCG\n\n"
-        "/start - شروع بازی\n"
-        "/points - نمایش امتیاز\n"
-        "/TCG_shop - خرید پک (30 امتیاز)\n"
-        "/TCG_Open - باز کردن کارت‌ها\n"
-        "/TCG_inv - مشاهده کارت‌ها\n"
+        "📖 دستورات:\n\n"
+        "/points\n"
+        "/TCG_shop\n"
+        "/TCG_Open\n"
+        "/TCG_inv\n"
+        "/sell\n"
+        "/trade\n"
+        "/chans"
     )
 
 
@@ -73,92 +59,150 @@ async def help_cmd(message: Message):
 # POINTS
 # =========================
 @dp.message(Command("points"))
-async def points_cmd(message: Message):
+async def points(message: Message):
 
-    points = get_points(message.from_user.id)
-
-    await message.answer(
-        f"💰 امتیاز شما: {points}"
-    )
+    await message.answer(f"💰 {get_points(message.from_user.id)}")
 
 
 # =========================
 # SHOP
 # =========================
 @dp.message(Command("TCG_shop"))
-async def shop_cmd(message: Message):
+async def shop(message: Message):
 
-    user_id = message.from_user.id
-    points = get_points(user_id)
-
-    if points < 30:
-        await message.answer("❌ امتیاز کافی نیست (حداقل 30)")
+    uid = message.from_user.id
+    if get_points(uid) < 30:
+        await message.answer("❌ امتیاز کافی نیست")
         return
 
-    remove_points(user_id, 30)
+    remove_points(uid, 30)
 
     pack = random.sample(CARDS, 8)
 
     for name, img in pack:
-        add_unopened_card(user_id, name, img)
+        add_unopened_card(uid, name, img)
 
-    await message.answer(
-        "📦 پک خریداری شد!\n\n"
-        "🎴 برای باز کردن: /TCG_Open"
-    )
+    await message.answer("📦 پک خریدی!")
 
 
 # =========================
-# OPEN CARD
+# OPEN
 # =========================
 @dp.message(Command("TCG_Open"))
-async def open_cmd(message: Message):
+async def open_card(message: Message):
 
-    user_id = message.from_user.id
-
-    card = get_next_unopened(user_id)
+    card = get_next_unopened(message.from_user.id)
 
     if not card:
-        await message.answer("📦 کارت باز نشده نداری")
+        await message.answer("📦 چیزی نداری")
         return
 
-    card_id, _, name, img = card
+    cid, _, name, img = card
 
     try:
         photo = FSInputFile(os.path.join(BASE_PATH, img))
-
-        await message.answer_photo(
-            photo,
-            caption=f"🎴 {name}"
-        )
+        await message.answer_photo(photo, caption=name)
     except:
-        await message.answer(f"🎴 {name}")
+        await message.answer(name)
 
-    move_card_to_inventory(card_id)
+    move_card_to_inventory(cid)
 
-    await message.answer(
-        f"📦 باقی مانده: {unopened_count(user_id)}"
-    )
+    await message.answer(f"📦 باقی: {unopened_count(message.from_user.id)}")
 
 
 # =========================
 # INVENTORY
 # =========================
 @dp.message(Command("TCG_inv"))
-async def inv_cmd(message: Message):
+async def inv(message: Message):
 
     cards = get_inventory(message.from_user.id)
 
     if not cards:
-        await message.answer("📦 اینونتوری خالیه")
+        await message.answer("خالیه")
         return
 
-    text = "🎴 کارت‌های شما:\n\n"
-
+    text = "🎴:\n"
     for i, c in enumerate(cards, 1):
         text += f"{i}. {c[0]}\n"
 
     await message.answer(text)
+
+
+# =========================
+# SELL
+# =========================
+@dp.message(Command("sell"))
+async def sell(message: Message):
+
+    args = message.text.split()
+    if len(args) < 3:
+        await message.answer("/sell name price")
+        return
+
+    name = " ".join(args[1:-1])
+    price = int(args[-1])
+
+    sell_card(message.from_user.id, name, price)
+
+    await message.answer("💰 فروخته شد")
+
+
+# =========================
+# TRADE
+# =========================
+@dp.message(Command("trade"))
+async def trade(message: Message):
+
+    args = message.text.split()
+
+    if len(args) < 4:
+        await message.answer("/trade user_id card price")
+        return
+
+    target = int(args[1])
+    card_name = " ".join(args[2:-1])
+    price = int(args[-1])
+
+    seller = message.from_user.id
+
+    card = get_card_by_name(seller, card_name)
+
+    if not card:
+        await message.answer("❌ کارت نداری")
+        return
+
+    card_id = card[0]
+
+    add_points(target, -price)
+    add_points(seller, price)
+
+    transfer_card(card_id, seller, target)
+
+    await message.answer("✅ معامله شد")
+
+
+# =========================
+# CHANS
+# =========================
+@dp.message(Command("chans"))
+async def chans(message: Message):
+
+    uid = message.from_user.id
+    now = int(time.time())
+
+    last = get_last_chans(uid)
+
+    if now - last < 3600:
+        await message.answer("⏳ هر 1 ساعت یکبار")
+        return
+
+    reward = random.randint(100, 300)
+
+    add_points(uid, reward)
+    set_last_chans(uid, now)
+
+    await message.answer(f"🎉 +{reward}")
 
 
 # =========================
