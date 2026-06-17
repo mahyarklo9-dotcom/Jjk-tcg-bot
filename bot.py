@@ -4,13 +4,7 @@ import os
 import time
 
 from aiogram import Bot, Dispatcher, F
-from aiogram.types import (
-    Message,
-    FSInputFile,
-    InlineKeyboardMarkup,
-    InlineKeyboardButton,
-    CallbackQuery
-)
+from aiogram.types import Message, FSInputFile
 from aiogram.filters import Command
 
 from db import *
@@ -24,8 +18,17 @@ dp = Dispatcher()
 
 
 # =========================
+# TEMP STATES
+# =========================
+
+sell_states = {}
+trade_states = {}
+
+
+# =========================
 # START
 # =========================
+
 @dp.message(Command("start"))
 async def start(message: Message):
 
@@ -33,64 +36,40 @@ async def start(message: Message):
 
     points = register_user(uid)
 
-    keyboard = InlineKeyboardMarkup(
-        inline_keyboard=[
-            [
-                InlineKeyboardButton(
-                    text="🎴 خرید پک",
-                    callback_data="shop"
-                )
-            ],
-            [
-                InlineKeyboardButton(
-                    text="📦 باز کردن کارت",
-                    callback_data="open"
-                )
-            ],
-            [
-                InlineKeyboardButton(
-                    text="🎒 اینونتوری",
-                    callback_data="inv"
-                )
-            ],
-            [
-                InlineKeyboardButton(
-                    text="🎰 شانس",
-                    callback_data="chans"
-                )
-            ]
-        ]
-    )
-
     await message.answer(
         f"""
 🎴 JJK TCG ONLINE
 
-👋 خوش آمدی
+خوش آمدی
 
 💰 امتیاز فعلی: {points}
 
-برای شروع از دکمه‌ها یا دستورات استفاده کن.
-""",
-        reply_markup=keyboard
+برای مشاهده دستورات:
+
+/help
+"""
     )
 
 
 # =========================
 # HELP
 # =========================
+
 @dp.message(Command("help"))
 async def help_cmd(message: Message):
 
     await message.answer(
         """
-📖 راهنمای دستورات
+📖 راهنمای کامل
 
 /start
-شروع ربات
+شروع بازی
 
 /help
 نمایش راهنما
+
+/profile
+نمایش اطلاعات حساب
 
 /points
 نمایش امتیاز
@@ -98,23 +77,29 @@ async def help_cmd(message: Message):
 /shop
 خرید یک پک (30 امتیاز)
 
+/pack
+نمایش تعداد کارت‌های بازنشده
+
 /open
 باز کردن یک کارت
 
 /inv
-نمایش کارت‌ها
+نمایش اینونتوری
+
+/card
+نمایش یک کارت تصادفی
 
 /chans
-دریافت جایزه تصادفی هر 1 ساعت
+جایزه تصادفی هر یک ساعت
 
-/sell نام_کارت قیمت
+/sell
 فروش کارت
 
-/trade user_id نام_کارت قیمت
-انتقال کارت به کاربر دیگر
+/trade
+انتقال کارت به بازیکن دیگر
 
 /debug
-بررسی امتیاز داخل دیتابیس
+نمایش اطلاعات حساب
 
 /testpoints
 افزودن 100 امتیاز تستی
@@ -123,8 +108,42 @@ async def help_cmd(message: Message):
 
 
 # =========================
+# PROFILE
+# =========================
+
+@dp.message(Command("profile"))
+async def profile(message: Message):
+
+    uid = message.from_user.id
+
+    register_user(uid)
+
+    cards = get_inventory(uid)
+
+    unopened = unopened_count(uid)
+
+    await message.answer(
+        f"""
+👤 پروفایل
+
+🆔 {uid}
+
+💰 امتیاز:
+{get_points(uid)}
+
+🎒 تعداد کارت:
+{len(cards)}
+
+📦 کارت بازنشده:
+{unopened}
+"""
+    )
+
+
+# =========================
 # POINTS
 # =========================
+
 @dp.message(Command("points"))
 async def points(message: Message):
 
@@ -132,16 +151,55 @@ async def points(message: Message):
 
     register_user(uid)
 
-    p = get_points(uid)
+    await message.answer(
+        f"💰 امتیاز فعلی شما: {get_points(uid)}"
+    )
+
+
+# =========================
+# PACK
+# =========================
+
+@dp.message(Command("pack"))
+async def pack(message: Message):
+
+    uid = message.from_user.id
 
     await message.answer(
-        f"💰 امتیاز فعلی شما: {p}"
+        f"""
+📦 کارت‌های بازنشده
+
+تعداد:
+{unopened_count(uid)}
+
+برای باز کردن:
+/open
+"""
+    )
+
+
+# =========================
+# RANDOM CARD
+# =========================
+
+@dp.message(Command("card"))
+async def card(message: Message):
+
+    card_name, _ = random.choice(CARDS)
+
+    await message.answer(
+        f"""
+🎴 کارت تصادفی
+
+{card_name}
+"""
     )
 
 
 # =========================
 # DEBUG
 # =========================
+
 @dp.message(Command("debug"))
 async def debug(message: Message):
 
@@ -149,11 +207,13 @@ async def debug(message: Message):
 
     await message.answer(
         f"""
-🛠 اطلاعات کاربر
+🛠 اطلاعات حساب
 
-ID: {uid}
+ID:
+{uid}
 
-Points: {get_points(uid)}
+Points:
+{get_points(uid)}
 """
     )
 
@@ -161,6 +221,7 @@ Points: {get_points(uid)}
 # =========================
 # TEST POINTS
 # =========================
+
 @dp.message(Command("testpoints"))
 async def testpoints(message: Message):
 
@@ -173,23 +234,14 @@ async def testpoints(message: Message):
 ✅ 100 امتیاز اضافه شد
 
 💰 موجودی جدید:
+
 {get_points(uid)}
 """
-    )
-
-
-# =========================
-# DB PATH
-# =========================
-@dp.message(Command("dbpath"))
-async def dbpath(message: Message):
-
-    await message.answer(
-        os.path.abspath("tcg.db")
     )
     # =========================
 # SHOP
 # =========================
+
 @dp.message(Command("shop"))
 async def shop(message: Message):
 
@@ -200,33 +252,49 @@ async def shop(message: Message):
     points = get_points(uid)
 
     if points < 30:
+
         await message.answer(
             f"""
 ❌ امتیاز کافی نیست
 
-💰 موجودی شما: {points}
-🎴 قیمت هر پک: 30
+💰 موجودی شما:
+{points}
+
+🎴 قیمت هر پک:
+30
 """
         )
         return
 
     remove_points(uid, 30)
 
-    pack = random.sample(CARDS, 8)
+    pack_cards = random.sample(
+        CARDS,
+        min(8, len(CARDS))
+    )
 
-    for name, img in pack:
-        add_unopened_card(uid, name, img)
+    for name, img in pack_cards:
+
+        add_unopened_card(
+            uid,
+            name,
+            img
+        )
 
     await message.answer(
         f"""
-📦 پک با موفقیت خریداری شد
+✅ خرید موفق
 
-🎴 تعداد کارت داخل پک: 8
+📦 یک پک دریافت کردی
 
-💰 موجودی جدید:
+🎴 تعداد کارت:
+{len(pack_cards)}
+
+💰 موجودی فعلی:
 {get_points(uid)}
 
-برای باز کردن کارت‌ها:
+برای باز کردن کارت:
+
 /open
 """
     )
@@ -235,6 +303,7 @@ async def shop(message: Message):
 # =========================
 # OPEN CARD
 # =========================
+
 @dp.message(Command("open"))
 async def open_card(message: Message):
 
@@ -243,11 +312,13 @@ async def open_card(message: Message):
     card = get_next_unopened(uid)
 
     if not card:
+
         await message.answer(
             """
 📦 هیچ کارت بازنشده‌ای نداری
 
-ابتدا یک پک بخر:
+برای خرید:
+
 /shop
 """
         )
@@ -281,14 +352,13 @@ async def open_card(message: Message):
 
     move_card_to_inventory(card_id)
 
-    left = unopened_count(uid)
-
     await message.answer(
         f"""
 ✅ کارت به اینونتوری منتقل شد
 
-📦 کارت بازنشده باقی‌مانده:
-{left}
+📦 کارت باقی‌مانده:
+
+{unopened_count(uid)}
 """
     )
 
@@ -296,8 +366,9 @@ async def open_card(message: Message):
 # =========================
 # INVENTORY
 # =========================
+
 @dp.message(Command("inv"))
-async def inv(message: Message):
+async def inventory(message: Message):
 
     uid = message.from_user.id
 
@@ -307,9 +378,10 @@ async def inv(message: Message):
 
         await message.answer(
             """
-🎒 اینونتوری خالی است
+🎒 اینونتوری شما خالی است
 
-برای دریافت کارت:
+برای خرید کارت:
+
 /shop
 """
         )
@@ -322,170 +394,21 @@ async def inv(message: Message):
 
     for index, card in enumerate(cards, start=1):
 
-        card_name = card[1]
-
-        text += f"{index}. {card_name}\n"
+        text += f"{index}. {card[1]}\n"
 
     await message.answer(text)
-    # =========================
-# SELL CARD
-# =========================
-@dp.message(Command("sell"))
-async def sell(message: Message):
-
-    args = message.text.split()
-
-    if len(args) < 3:
-        await message.answer(
-            """
-❌ استفاده صحیح:
-
-/sell نام_کارت قیمت
-
-مثال:
-/sell JJK Card 5 100
-"""
-        )
-        return
-
-    try:
-        price = int(args[-1])
-    except:
-        await message.answer("❌ قیمت نامعتبر است")
-        return
-
-    card_name = " ".join(args[1:-1])
-
-    result = sell_card(
-        message.from_user.id,
-        card_name,
-        price
-    )
-
-    if not result:
-        await message.answer(
-            "❌ این کارت در اینونتوری شما وجود ندارد"
-        )
-        return
-
-    await message.answer(
-        f"""
-💰 کارت فروخته شد
-
-🎴 کارت:
-{card_name}
-
-💵 مبلغ:
-{price}
-
-💰 موجودی جدید:
-{get_points(message.from_user.id)}
-"""
-    )
-
-
-# =========================
-# TRADE CARD
-# =========================
-@dp.message(Command("trade"))
-async def trade(message: Message):
-
-    args = message.text.split()
-
-    if len(args) < 4:
-        await message.answer(
-            """
-❌ استفاده صحیح
-
-/trade user_id card_name price
-
-مثال:
-/trade 123456789 JJK Card 1 200
-"""
-        )
-        return
-
-    try:
-        target_user = int(args[1])
-        price = int(args[-1])
-    except:
-        await message.answer(
-            "❌ شناسه یا قیمت نامعتبر است"
-        )
-        return
-
-    card_name = " ".join(args[2:-1])
-
-    seller = message.from_user.id
-
-    card = get_card_by_name(
-        seller,
-        card_name
-    )
-
-    if not card:
-        await message.answer(
-            "❌ کارت پیدا نشد"
-        )
-        return
-
-    buyer_points = get_points(target_user)
-
-    if buyer_points < price:
-        await message.answer(
-            f"""
-❌ خریدار امتیاز کافی ندارد
-
-💰 موجودی خریدار:
-{buyer_points}
-
-💵 قیمت کارت:
-{price}
-"""
-        )
-        return
-
-    card_id = card[0]
-
-    remove_points(
-        target_user,
-        price
-    )
-
-    add_points(
-        seller,
-        price
-    )
-
-    transfer_card(
-        card_id,
-        seller,
-        target_user
-    )
-
-    await message.answer(
-        f"""
-✅ معامله انجام شد
-
-🎴 کارت:
-{card_name}
-
-💵 مبلغ:
-{price}
-
-👤 خریدار:
-{target_user}
-"""
-    )
 
 
 # =========================
 # CHANS
 # =========================
+
 @dp.message(Command("chans"))
 async def chans(message: Message):
 
     uid = message.from_user.id
+
+    register_user(uid)
 
     now = int(time.time())
 
@@ -503,224 +426,349 @@ async def chans(message: Message):
 ⏳ هنوز باید صبر کنی
 
 🕒 زمان باقی‌مانده:
-{minutes} دقیقه و {seconds} ثانیه
+
+{minutes} دقیقه
+{seconds} ثانیه
 """
         )
+
         return
 
-    reward = random.randint(100, 300)
+    reward = random.randint(
+        100,
+        300
+    )
 
-    add_points(uid, reward)
+    add_points(
+        uid,
+        reward
+    )
 
-    set_last_chans(uid, now)
+    set_last_chans(
+        uid,
+        now
+    )
 
     await message.answer(
         f"""
 🎰 جایزه دریافت شد
 
 💎 جایزه:
-{reward} امتیاز
+{reward}
 
-💰 موجودی جدید:
+💰 موجودی فعلی:
 {get_points(uid)}
 
-🕒 استفاده بعدی:
+استفاده بعدی:
 1 ساعت دیگر
 """
     )
     # =========================
-# CALLBACK SHOP
+# SELL CARD
 # =========================
-@dp.callback_query(F.data == "shop")
-async def cb_shop(callback: CallbackQuery):
 
-    uid = callback.from_user.id
+@dp.message(Command("sell"))
+async def sell_start(message: Message):
 
-    register_user(uid)
-
-    points = get_points(uid)
-
-    if points < 30:
-        await callback.message.answer(
-            f"""
-❌ امتیاز کافی نیست
-
-💰 موجودی شما:
-{points}
-
-🎴 قیمت پک:
-30
-"""
-        )
-
-        await callback.answer()
-        return
-
-    remove_points(uid, 30)
-
-    pack = random.sample(CARDS, 8)
-
-    for name, img in pack:
-        add_unopened_card(uid, name, img)
-
-    await callback.message.answer(
-        f"""
-📦 پک خریداری شد
-
-🎴 تعداد کارت:
-8
-
-💰 موجودی جدید:
-{get_points(uid)}
-
-برای باز کردن:
-/open
-"""
-    )
-
-    await callback.answer()
-
-
-# =========================
-# CALLBACK OPEN
-# =========================
-@dp.callback_query(F.data == "open")
-async def cb_open(callback: CallbackQuery):
-
-    uid = callback.from_user.id
-
-    card = get_next_unopened(uid)
-
-    if not card:
-
-        await callback.message.answer(
-            "📦 هیچ کارت بازنشده‌ای نداری"
-        )
-
-        await callback.answer()
-        return
-
-    card_id, _, card_name, image_file = card
-
-    try:
-
-        image_path = os.path.join(
-            BASE_PATH,
-            image_file
-        )
-
-        photo = FSInputFile(image_path)
-
-        await callback.message.answer_photo(
-            photo,
-            caption=f"🎴 {card_name}"
-        )
-
-    except Exception:
-
-        await callback.message.answer(
-            f"🎴 {card_name}"
-        )
-
-    move_card_to_inventory(card_id)
-
-    await callback.message.answer(
-        f"""
-📦 باقی‌مانده:
-{unopened_count(uid)}
-"""
-    )
-
-    await callback.answer()
-
-
-# =========================
-# CALLBACK INVENTORY
-# =========================
-@dp.callback_query(F.data == "inv")
-async def cb_inv(callback: CallbackQuery):
-
-    uid = callback.from_user.id
+    uid = message.from_user.id
 
     cards = get_inventory(uid)
 
     if not cards:
 
-        await callback.message.answer(
+        await message.answer(
             "🎒 اینونتوری شما خالی است"
         )
-
-        await callback.answer()
         return
 
-    text = (
-        f"🎒 اینونتوری شما\n\n"
-        f"📊 تعداد کارت‌ها: {len(cards)}\n\n"
+    sell_states[uid] = {
+        "step": "card"
+    }
+
+    await message.answer(
+        "🎴 نام کارت را وارد کن:"
     )
 
-    for i, card in enumerate(cards, start=1):
 
-        text += f"{i}. {card[1]}\n"
+# =========================
+# TRADE CARD
+# =========================
 
-    await callback.message.answer(text)
+@dp.message(Command("trade"))
+async def trade_start(message: Message):
 
-    await callback.answer()
+    uid = message.from_user.id
+
+    trade_states[uid] = {
+        "step": "buyer"
+    }
+
+    await message.answer(
+        "👤 شناسه خریدار را وارد کن:"
+    )
 
 
 # =========================
-# CALLBACK CHANS
+# SELL FLOW
 # =========================
-@dp.callback_query(F.data == "chans")
-async def cb_chans(callback: CallbackQuery):
 
-    uid = callback.from_user.id
+@dp.message()
+async def sell_flow(message: Message):
 
-    now = int(time.time())
+    uid = message.from_user.id
 
-    last = get_last_chans(uid)
+    # ------------------
+    # SELL
+    # ------------------
 
-    remain = 3600 - (now - last)
+    if uid in sell_states:
 
-    if remain > 0:
+        state = sell_states[uid]
 
-        minutes = remain // 60
-        seconds = remain % 60
+        if state["step"] == "card":
 
-        await callback.message.answer(
-            f"""
-⏳ هنوز باید صبر کنی
+            card_name = message.text.strip()
 
-🕒 {minutes} دقیقه
-🕒 {seconds} ثانیه
-"""
-        )
+            card = get_card_by_name(
+                uid,
+                card_name
+            )
 
-        await callback.answer()
-        return
+            if not card:
 
-    reward = random.randint(100, 300)
+                await message.answer(
+                    "❌ چنین کارتی در اینونتوری شما نیست"
+                )
+                return
 
-    add_points(uid, reward)
+            state["card_name"] = card_name
+            state["step"] = "price"
 
-    set_last_chans(uid, now)
+            await message.answer(
+                "💰 قیمت فروش را وارد کن:"
+            )
 
-    await callback.message.answer(
-        f"""
-🎰 جایزه دریافت شد
+            return
 
-💎 {reward} امتیاز
+        if state["step"] == "price":
 
-💰 موجودی فعلی:
+            try:
+
+                price = int(
+                    message.text.strip()
+                )
+
+            except:
+
+                await message.answer(
+                    "❌ فقط عدد وارد کن"
+                )
+                return
+
+            card_name = state["card_name"]
+
+            result = sell_card(
+                uid,
+                card_name,
+                price
+            )
+
+            del sell_states[uid]
+
+            if not result:
+
+                await message.answer(
+                    "❌ فروش انجام نشد"
+                )
+                return
+
+            await message.answer(
+                f"""
+✅ کارت فروخته شد
+
+🎴 کارت:
+{card_name}
+
+💰 مبلغ:
+{price}
+
+💎 موجودی جدید:
 {get_points(uid)}
 """
-    )
+            )
 
-    await callback.answer()
+            return
+
+    # ------------------
+    # TRADE
+    # ------------------
+
+    if uid in trade_states:
+
+        state = trade_states[uid]
+
+        if state["step"] == "buyer":
+
+            try:
+
+                buyer = int(
+                    message.text.strip()
+                )
+
+            except:
+
+                await message.answer(
+                    "❌ شناسه نامعتبر است"
+                )
+                return
+
+            state["buyer"] = buyer
+            state["step"] = "card"
+
+            await message.answer(
+                "🎴 نام کارت را وارد کن:"
+            )
+
+            return
+
+        if state["step"] == "card":
+
+            card_name = message.text.strip()
+
+            card = get_card_by_name(
+                uid,
+                card_name
+            )
+
+            if not card:
+
+                await message.answer(
+                    "❌ کارت پیدا نشد"
+                )
+                return
+
+            state["card_name"] = card_name
+            state["step"] = "price"
+
+            await message.answer(
+                "💰 قیمت معامله را وارد کن:"
+            )
+
+            return
+
+        if state["step"] == "price":
+
+            try:
+
+                price = int(
+                    message.text.strip()
+                )
+
+            except:
+
+                await message.answer(
+                    "❌ قیمت نامعتبر است"
+                )
+                return
+
+            buyer = state["buyer"]
+            card_name = state["card_name"]
+
+            buyer_points = get_points(
+                buyer
+            )
+
+            if buyer_points < price:
+
+                del trade_states[uid]
+
+                await message.answer(
+                    f"""
+❌ خریدار امتیاز کافی ندارد
+
+💰 موجودی خریدار:
+{buyer_points}
+
+💵 قیمت:
+{price}
+"""
+                )
+
+                return
+
+            card = get_card_by_name(
+                uid,
+                card_name
+            )
+
+            if not card:
+
+                del trade_states[uid]
+
+                await message.answer(
+                    "❌ کارت پیدا نشد"
+                )
+
+                return
+
+            card_id = card[0]
+
+            remove_points(
+                buyer,
+                price
+            )
+
+            add_points(
+                uid,
+                price
+            )
+
+            transfer_card(
+                card_id,
+                uid,
+                buyer
+            )
+
+            del trade_states[uid]
+
+            await message.answer(
+                f"""
+✅ معامله انجام شد
+
+🎴 کارت:
+{card_name}
+
+👤 خریدار:
+{buyer}
+
+💰 مبلغ:
+{price}
+"""
+            )
+
+            return
+            # =========================
+# FALLBACK
+# =========================
+
+@dp.message()
+async def unknown_command(message: Message):
+
+    await message.answer(
+        """
+❓ دستور ناشناخته
+
+برای مشاهده دستورات:
+
+/help
+"""
+    )
 
 
 # =========================
 # RUN
 # =========================
+
 async def main():
 
     init_db()
