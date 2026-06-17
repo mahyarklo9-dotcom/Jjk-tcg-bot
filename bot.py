@@ -8,7 +8,7 @@ from aiogram.types import Message, FSInputFile, InlineKeyboardMarkup, InlineKeyb
 from aiogram.filters import Command
 
 from db import *
-from cards import CARDS
+from cards import CARDS, BASE_PATH
 
 
 TOKEN = os.getenv("TOKEN")
@@ -18,7 +18,7 @@ dp = Dispatcher()
 
 
 # =========================
-# START
+# START MENU (INTERACTIVE)
 # =========================
 @dp.message(Command("start"))
 async def start(message: Message):
@@ -36,26 +36,26 @@ async def start(message: Message):
     ])
 
     await message.answer(
-        f"🎴 Welcome to JJK TCG!\n\n💰 امتیاز: {points}\n\n🔥 انتخاب کن:",
+        f"🎴 JJK TCG Online\n\n💰 امتیاز: {points}\n\n🔥 یکی رو انتخاب کن:",
         reply_markup=keyboard
     )
 
 
 # =========================
-# HELP
+# HELP (HUMAN STYLE)
 # =========================
 @dp.message(Command("help"))
 async def help_cmd(message: Message):
 
     await message.answer(
-        "📖 دستورات:\n\n"
+        "📖 راهنمای ربات:\n\n"
         "/start - شروع بازی\n"
-        "/points - امتیاز\n"
-        "/shop - خرید پک 30 امتیازی\n"
-        "/open - باز کردن کارت\n"
+        "/points - دیدن امتیاز\n"
+        "/shop - خرید پک (30 امتیاز)\n"
+        "/open - باز کردن کارت‌ها\n"
         "/inv - اینونتوری\n"
         "/sell name price - فروش کارت\n"
-        "/trade user card price\n"
+        "/trade user card price - معامله\n"
         "/chans - شانس 1 ساعته"
     )
 
@@ -70,7 +70,7 @@ async def points(message: Message):
 
 
 # =========================
-# SHOP (COMMAND + BUTTON)
+# SHOP (PACK SYSTEM)
 # =========================
 @dp.message(Command("shop"))
 @dp.callback_query(F.data == "shop")
@@ -95,13 +95,13 @@ async def shop(event):
 
     await bot.send_message(
         uid,
-        "📦 پک خریداری شد!\n🎴 حالا کارت‌ها را باز کن",
+        "📦 پک خریداری شد!\n🎴 حالا بازش کن",
         reply_markup=keyboard
     )
 
 
 # =========================
-# OPEN CARD
+# OPEN CARD (FIXED PATH)
 # =========================
 @dp.message(Command("open"))
 @dp.callback_query(F.data == "open")
@@ -118,7 +118,7 @@ async def open_card(event):
     cid, _, name, img = card
 
     try:
-        photo = FSInputFile(img)
+        photo = FSInputFile(os.path.join(BASE_PATH, img))
         await bot.send_photo(uid, photo, caption=f"🎴 {name}")
     except:
         await bot.send_message(uid, f"🎴 {name}")
@@ -152,7 +152,7 @@ async def inv(event):
 
 
 # =========================
-# SELL
+# SELL SYSTEM
 # =========================
 @dp.message(Command("sell"))
 async def sell(message: Message):
@@ -168,11 +168,11 @@ async def sell(message: Message):
 
     sell_card(message.from_user.id, name, price)
 
-    await message.answer(f"💰 فروخته شد {price}")
+    await message.answer(f"💰 فروخته شد: {price}")
 
 
 # =========================
-# TRADE
+# TRADE SYSTEM
 # =========================
 @dp.message(Command("trade"))
 async def trade(message: Message):
@@ -206,7 +206,7 @@ async def trade(message: Message):
 
 
 # =========================
-# CHANS (HYPE VERSION)
+# CHANS (1 HOUR COOLDOWN)
 # =========================
 @dp.message(Command("chans"))
 async def chans(message: Message):
@@ -218,7 +218,7 @@ async def chans(message: Message):
 
     if now - last < 3600:
         remain = 3600 - (now - last)
-        await message.answer(f"⏳ هنوز {remain//60} دقیقه مونده")
+        await message.answer(f"⏳ صبر کن: {remain//60} دقیقه")
         return
 
     reward = random.randint(100, 300)
@@ -227,17 +227,15 @@ async def chans(message: Message):
     set_last_chans(uid, now)
 
     await message.answer(
-        f"🎰 CHANCE ACTIVATED!\n\n"
-        f"💰 +{reward} coins\n"
-        f"🔥 شانس امروزت فعال شد!"
+        f"🎰 CHANCE!\n\n💰 +{reward} امتیاز گرفتی!"
     )
 
 
 # =========================
-# CALLBACKS FIX
+# CALLBACK HANDLER
 # =========================
 @dp.callback_query()
-async def callbacks(call):
+async def callback_handler(call):
 
     if call.data == "shop":
         await shop(call.message)
@@ -250,7 +248,7 @@ async def callbacks(call):
 
 
 # =========================
-# MAIN
+# RUN BOT
 # =========================
 async def main():
     await dp.start_polling(bot)
