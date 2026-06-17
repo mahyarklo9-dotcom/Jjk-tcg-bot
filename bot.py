@@ -251,7 +251,21 @@ async def cb(call):
     elif call.data == "inv":
         await inv(call.message)
 
+import os
 
+@dp.message(Command("dbpath"))
+async def dbpath(message: Message):
+    await message.answer(os.path.abspath("tcg.db"))
+    @dp.message(Command("testpoints"))
+async def testpoints(message: Message):
+
+    uid = message.from_user.id
+
+    add_points(uid, 100)
+
+    await message.answer(
+        f"امتیاز جدید: {get_points(uid)}"
+    )
 # =========================
 # RUN
 # =========================
