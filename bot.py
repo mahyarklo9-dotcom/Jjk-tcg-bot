@@ -18,7 +18,17 @@ dp = Dispatcher()
 
 
 # =========================
-# START MENU (INTERACTIVE)
+# SAFE POINTS (FIX BUG)
+# =========================
+def safe_points(user_id):
+    p = get_points(user_id)
+    if p is None:
+        return 0
+    return int(p)
+
+
+# =========================
+# START
 # =========================
 @dp.message(Command("start"))
 async def start(message: Message):
@@ -27,7 +37,7 @@ async def start(message: Message):
     points = register_user(uid)
 
     if points is None:
-        points = get_points(uid)
+        points = safe_points(uid)
 
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="🎴 خرید پک", callback_data="shop")],
@@ -36,27 +46,20 @@ async def start(message: Message):
     ])
 
     await message.answer(
-        f"🎴 JJK TCG Online\n\n💰 امتیاز: {points}\n\n🔥 یکی رو انتخاب کن:",
+        f"🎴 JJK TCG\n\n💰 امتیاز: {points}",
         reply_markup=keyboard
     )
 
 
 # =========================
-# HELP (HUMAN STYLE)
+# HELP
 # =========================
 @dp.message(Command("help"))
 async def help_cmd(message: Message):
 
     await message.answer(
-        "📖 راهنمای ربات:\n\n"
-        "/start - شروع بازی\n"
-        "/points - دیدن امتیاز\n"
-        "/shop - خرید پک (30 امتیاز)\n"
-        "/open - باز کردن کارت‌ها\n"
-        "/inv - اینونتوری\n"
-        "/sell name price - فروش کارت\n"
-        "/trade user card price - معامله\n"
-        "/chans - شانس 1 ساعته"
+        "📖 دستورات:\n"
+        "/start\n/points\n/shop\n/open\n/inv\n/sell\n/trade\n/chans"
     )
 
 
@@ -66,11 +69,11 @@ async def help_cmd(message: Message):
 @dp.message(Command("points"))
 async def points(message: Message):
 
-    await message.answer(f"💰 امتیاز شما: {get_points(message.from_user.id)}")
+    await message.answer(f"💰 {safe_points(message.from_user.id)}")
 
 
 # =========================
-# SHOP (PACK SYSTEM)
+# SHOP (FIXED CONDITION)
 # =========================
 @dp.message(Command("shop"))
 @dp.callback_query(F.data == "shop")
@@ -78,8 +81,11 @@ async def shop(event):
 
     uid = event.from_user.id if isinstance(event, Message) else event.message.chat.id
 
-    if get_points(uid) < 30:
-        await bot.send_message(uid, "❌ امتیاز کافی نیست")
+    points = safe_points(uid)
+
+    # ✅ FIX: درست بررسی امتیاز
+    if points < 30:
+        await bot.send_message(uid, f"❌ امتیاز کافی نیست\n💰 داری: {points}")
         return
 
     remove_points(uid, 30)
@@ -89,19 +95,11 @@ async def shop(event):
     for name, img in pack:
         add_unopened_card(uid, name, img)
 
-    keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="🎴 باز کردن کارت", callback_data="open")]
-    ])
-
-    await bot.send_message(
-        uid,
-        "📦 پک خریداری شد!\n🎴 حالا بازش کن",
-        reply_markup=keyboard
-    )
+    await bot.send_message(uid, "📦 پک خریداری شد!")
 
 
 # =========================
-# OPEN CARD (FIXED PATH)
+# OPEN CARD
 # =========================
 @dp.message(Command("open"))
 @dp.callback_query(F.data == "open")
@@ -143,7 +141,7 @@ async def inv(event):
         await bot.send_message(uid, "📦 خالیه")
         return
 
-    text = "🎴 کارت‌های شما:\n\n"
+    text = "🎴 کارت‌ها:\n\n"
 
     for i, c in enumerate(cards, 1):
         text += f"{i}. {c[0]}\n"
@@ -152,7 +150,7 @@ async def inv(event):
 
 
 # =========================
-# SELL SYSTEM
+# SELL
 # =========================
 @dp.message(Command("sell"))
 async def sell(message: Message):
@@ -168,11 +166,11 @@ async def sell(message: Message):
 
     sell_card(message.from_user.id, name, price)
 
-    await message.answer(f"💰 فروخته شد: {price}")
+    await message.answer(f"💰 فروخته شد")
 
 
 # =========================
-# TRADE SYSTEM
+# TRADE
 # =========================
 @dp.message(Command("trade"))
 async def trade(message: Message):
@@ -202,11 +200,11 @@ async def trade(message: Message):
 
     transfer_card(card_id, seller, target)
 
-    await message.answer("✅ معامله انجام شد")
+    await message.answer("✅ معامله شد")
 
 
 # =========================
-# CHANS (1 HOUR COOLDOWN)
+# CHANS
 # =========================
 @dp.message(Command("chans"))
 async def chans(message: Message):
@@ -217,8 +215,7 @@ async def chans(message: Message):
     last = get_last_chans(uid)
 
     if now - last < 3600:
-        remain = 3600 - (now - last)
-        await message.answer(f"⏳ صبر کن: {remain//60} دقیقه")
+        await message.answer("⏳ هنوز باید صبر کنی")
         return
 
     reward = random.randint(100, 300)
@@ -226,16 +223,14 @@ async def chans(message: Message):
     add_points(uid, reward)
     set_last_chans(uid, now)
 
-    await message.answer(
-        f"🎰 CHANCE!\n\n💰 +{reward} امتیاز گرفتی!"
-    )
+    await message.answer(f"🎰 +{reward} امتیاز")
 
 
 # =========================
-# CALLBACK HANDLER
+# CALLBACK FIX
 # =========================
 @dp.callback_query()
-async def callback_handler(call):
+async def cb(call):
 
     if call.data == "shop":
         await shop(call.message)
@@ -248,7 +243,7 @@ async def callback_handler(call):
 
 
 # =========================
-# RUN BOT
+# RUN
 # =========================
 async def main():
     await dp.start_polling(bot)
