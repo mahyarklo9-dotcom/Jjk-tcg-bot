@@ -121,11 +121,11 @@ async def inv_nav(callback: CallbackQuery):
     )
 
     await callback.message.edit_media(
-        media=InputMediaPhoto(
-            media=FSInputFile(image_path),
-            caption=f"🎴 {card[1]}\n\n📊 {index+1} / {len(cards)}"
-        ),
-        reply_markup=keyboard
+    media=InputMediaPhoto(
+        media=image_path,
+        caption=f"🎴 {card[1]}\n\n📊 {index+1} / {len(cards)}"
+    ),
+    reply_markup=keyboard
     )
 
     await callback.answer()
