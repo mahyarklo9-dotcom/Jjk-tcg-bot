@@ -4,13 +4,7 @@ import os
 import time
 
 from aiogram import Bot, Dispatcher, F
-from aiogram.types import (
-    Message,
-    FSInputFile,
-    CallbackQuery,
-    InlineKeyboardMarkup,
-    InlineKeyboardButton
-)
+from aiogram.types import Message, FSInputFile, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.filters import Command
 
 from db import *
@@ -37,7 +31,45 @@ inv_index = {}
 
 
 # =========================
-# INVENTORY (GALLERY)
+# START / HELP
+# =========================
+
+@dp.message(Command("start"))
+async def start(message: Message):
+    uid = message.from_user.id
+    points = register_user(uid)
+
+    await message.answer(f"🎴 خوش آمدی\n💰 امتیاز: {points}\n/help")
+
+
+@dp.message(Command("help"))
+async def help_cmd(message: Message):
+    await message.answer("""
+📌 دستورات:
+
+/inv - گالری کارت
+/shop - خرید پک
+/open - باز کردن کارت
+/sell - فروش
+/trade - انتقال
+/help_trade
+""")
+
+
+@dp.message(Command("help_trade"))
+async def help_trade(message: Message):
+    await message.answer("""
+🤝 سیستم معامله:
+
+/trade
+→ ID
+→ کارت
+→ قیمت
+""")
+
+
+# =========================
+# INVENTORY
 # =========================
 
 @dp.message(Command("inv"))
@@ -47,7 +79,7 @@ async def inventory(message: Message):
     cards = get_inventory(uid)
 
     if not cards:
-        await message.answer("🎒 اینونتوری خالی است")
+        await message.answer("🎒 خالی است")
         return
 
     inv_states[uid] = cards
@@ -77,22 +109,34 @@ async def inventory(message: Message):
 
 
 # =========================
-# NEXT
+# NAVIGATION SAFE
 # =========================
 
-@dp.callback_query(F.data.startswith("inv_next_"))
-async def inv_next(callback: CallbackQuery):
+@dp.callback_query(F.data.startswith("inv_"))
+async def inv_nav(callback: CallbackQuery):
 
     uid = callback.from_user.id
 
     if uid not in inv_states:
-        await callback.answer("منقضی شد")
+        await callback.answer("گالری منقضی شد")
         return
 
     cards = inv_states[uid]
-    index = int(callback.data.split("_")[-1])
 
-    index += 1
+    try:
+        _, action, index = callback.data.split("_")
+        index = int(index)
+    except:
+        await callback.answer("خطا")
+        return
+
+    if action == "next":
+        index += 1
+    else:
+        index -= 1
+
+    if index < 0:
+        index = len(cards) - 1
     if index >= len(cards):
         index = 0
 
@@ -126,56 +170,7 @@ async def inv_next(callback: CallbackQuery):
 
 
 # =========================
-# PREV
-# =========================
-
-@dp.callback_query(F.data.startswith("inv_prev_"))
-async def inv_prev(callback: CallbackQuery):
-
-    uid = callback.from_user.id
-
-    if uid not in inv_states:
-        await callback.answer("منقضی شد")
-        return
-
-    cards = inv_states[uid]
-    index = int(callback.data.split("_")[-1])
-
-    index -= 1
-    if index < 0:
-        index = len(cards) - 1
-
-    inv_index[uid] = index
-    card = cards[index]
-
-    image_path = os.path.join(BASE_PATH, card[2])
-
-    keyboard = InlineKeyboardMarkup(
-        inline_keyboard=[
-            [
-                InlineKeyboardButton(text="⬅️", callback_data=f"inv_prev_{index}"),
-                InlineKeyboardButton(text="➡️", callback_data=f"inv_next_{index}")
-            ],
-            [
-                InlineKeyboardButton(text="🗑 فروش", callback_data="inv_sell"),
-                InlineKeyboardButton(text="🎁 انتقال", callback_data="inv_trade")
-            ]
-        ]
-    )
-
-    await callback.message.delete()
-
-    await callback.message.answer_photo(
-        FSInputFile(image_path),
-        caption=f"🎴 {card[1]}\n\n📊 {index+1} / {len(cards)}",
-        reply_markup=keyboard
-    )
-
-    await callback.answer()
-
-
-# =========================
-# SELL
+# SELL (SAFE)
 # =========================
 
 @dp.callback_query(F.data == "inv_sell")
@@ -191,20 +186,14 @@ async def inv_sell(callback: CallbackQuery):
     index = inv_index.get(uid, 0)
     card = cards[index]
 
-    sell_states[uid] = {
-        "step": "price",
-        "card_name": card[1]
-    }
+    sell_states[uid] = {"step": "price", "card_name": card[1]}
 
-    await callback.message.answer(
-        f"🗑 فروش:\n🎴 {card[1]}\n💰 قیمت را وارد کن:"
-    )
-
+    await callback.message.answer(f"🗑 فروش: {card[1]}\n💰 قیمت؟")
     await callback.answer()
 
 
 # =========================
-# TRADE
+# TRADE (SAFE)
 # =========================
 
 @dp.callback_query(F.data == "inv_trade")
@@ -220,28 +209,22 @@ async def inv_trade(callback: CallbackQuery):
     index = inv_index.get(uid, 0)
     card = cards[index]
 
-    trade_states[uid] = {
-        "step": "buyer",
-        "card_name": card[1]
-    }
+    trade_states[uid] = {"step": "buyer", "card_name": card[1]}
 
-    await callback.message.answer(
-        f"🎁 انتقال:\n🎴 {card[1]}\n👤 ID را وارد کن:"
-    )
-
+    await callback.message.answer(f"🎁 انتقال: {card[1]}\n👤 ID؟")
     await callback.answer()
 
 
 # =========================
-# FLOW (SELL + TRADE)
+# MESSAGE HANDLER (FIXED CORE)
 # =========================
 
 @dp.message()
-async def flow(message: Message):
+async def handle_steps(message: Message):
 
     uid = message.from_user.id
 
-    # SELL
+    # ================= SELL =================
     if uid in sell_states:
 
         state = sell_states[uid]
@@ -260,7 +243,7 @@ async def flow(message: Message):
             await message.answer("✅ فروخته شد")
             return
 
-    # TRADE
+    # ================= TRADE =================
     if uid in trade_states:
 
         state = trade_states[uid]
@@ -289,7 +272,7 @@ async def flow(message: Message):
 
             if get_points(buyer) < price:
                 del trade_states[uid]
-                await message.answer("❌ پول کافی نیست")
+                await message.answer("❌ پول کم است")
                 return
 
             card = get_card_by_name(uid, state["card_name"])
@@ -310,14 +293,9 @@ async def flow(message: Message):
 
 
 # =========================
-# RUN
+# FALLBACK (IMPORTANT FIX)
 # =========================
 
-async def main():
-    init_db()
-    print("Bot started...")
-    await dp.start_polling(bot)
-
-
-if __name__ == "__main__":
-    asyncio.run(main())
+@dp.message()
+async def unknown(message: Message):
+    await message.answer("❓ دستور اشتباه\n/help")
