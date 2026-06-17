@@ -17,10 +17,6 @@ from db import *
 from cards import CARDS, BASE_PATH
 
 
-# =========================
-# TOKEN
-# =========================
-
 TOKEN = os.getenv("TOKEN")
 
 if not TOKEN:
@@ -46,20 +42,11 @@ inv_index = {}
 
 @dp.message(Command("start"))
 async def start(message: Message):
-
     uid = message.from_user.id
     points = register_user(uid)
 
     await message.answer(
-        f"""
-🎴 JJK TCG ONLINE
-
-👤 خوش آمدی
-
-💰 امتیاز: {points}
-
-/help
-"""
+        f"🎴 خوش آمدی\n💰 امتیاز: {points}\n/help"
     )
 
 
@@ -69,20 +56,18 @@ async def start(message: Message):
 
 @dp.message(Command("help"))
 async def help_cmd(message: Message):
+    await message.answer("""
+📌 دستورات:
 
-    await message.answer(
-        """
-📌 دستورات اصلی:
-
-/profile - پروفایل
-/inv - گالری کارت‌ها
-/shop - خرید پک
-/open - باز کردن کارت
-/sell - فروش کارت
-/trade - انتقال کارت
-/help_trade - راهنمای معامله
-"""
-    )
+/profile
+/inv
+/shop
+/open
+/sell
+/trade
+/luck
+/help_trade
+""")
 
 
 # =========================
@@ -95,41 +80,67 @@ async def profile(message: Message):
     uid = message.from_user.id
     register_user(uid)
 
-    cards = get_inventory(uid)
-    unopened = unopened_count(uid)
-
     await message.answer(
         f"""
 👤 پروفایل
 
-🆔 ID: {uid}
-
+🆔 {uid}
 💰 امتیاز: {get_points(uid)}
-
-🎒 کارت‌ها: {len(cards)}
-
-📦 کارت‌های بازنشده: {unopened}
+🎒 کارت‌ها: {len(get_inventory(uid))}
+📦 بازنشده: {unopened_count(uid)}
 """
     )
 
 
 # =========================
-# HELP TRADE
+# SHOP
 # =========================
 
-@dp.message(Command("help_trade"))
-async def help_trade(message: Message):
+@dp.message(Command("shop"))
+async def shop(message: Message):
 
-    await message.answer(
-        """
-🤝 نحوه معامله:
+    uid = message.from_user.id
+    register_user(uid)
 
-1️⃣ /trade
-2️⃣ ID خریدار
-3️⃣ نام کارت
-4️⃣ قیمت
-"""
-    )
+    if get_points(uid) < 30:
+        await message.answer("❌ امتیاز کافی نیست (30 لازم است)")
+        return
+
+    remove_points(uid, 30)
+
+    pack = random.sample(CARDS, min(8, len(CARDS)))
+
+    for name, img in pack:
+        add_unopened_card(uid, name, img)
+
+    await message.answer("✅ پک خریداری شد\n/open")
+
+
+# =========================
+# OPEN
+# =========================
+
+@dp.message(Command("open"))
+async def open_card(message: Message):
+
+    uid = message.from_user.id
+
+    card = get_next_unopened(uid)
+
+    if not card:
+        await message.answer("📦 کارتی برای باز کردن نداری")
+        return
+
+    card_id, _, name, img = card
+
+    path = os.path.join(BASE_PATH, img)
+
+    try:
+        await message.answer_photo(FSInputFile(path), caption=f"🎴 {name}")
+    except:
+        await message.answer(f"🎴 {name}")
+
+    move_card_to_inventory(card_id)
 
 
 # =========================
@@ -137,201 +148,216 @@ async def help_trade(message: Message):
 # =========================
 
 @dp.message(Command("inv"))
-async def inventory(message: Message):
+async def inv(message: Message):
 
     uid = message.from_user.id
     cards = get_inventory(uid)
 
     if not cards:
-        await message.answer("🎒 اینونتوری خالی است")
+        await message.answer("🎒 خالی است")
         return
 
     inv_states[uid] = cards
     inv_index[uid] = 0
 
     card = cards[0]
-    image_path = os.path.join(BASE_PATH, card[2])
+    path = os.path.join(BASE_PATH, card[2])
 
-    keyboard = InlineKeyboardMarkup(
+    kb = InlineKeyboardMarkup(
         inline_keyboard=[
             [
-                InlineKeyboardButton(text="⬅️", callback_data="inv_prev_0"),
-                InlineKeyboardButton(text="➡️", callback_data="inv_next_0")
+                InlineKeyboardButton(text="⬅️", callback_data="prev_0"),
+                InlineKeyboardButton(text="➡️", callback_data="next_0")
             ],
             [
-                InlineKeyboardButton(text="🗑 فروش", callback_data="inv_sell"),
-                InlineKeyboardButton(text="🎁 انتقال", callback_data="inv_trade")
+                InlineKeyboardButton(text="🗑 فروش", callback_data="sell"),
+                InlineKeyboardButton(text="🎁 انتقال", callback_data="trade")
             ]
         ]
     )
 
     await message.answer_photo(
-        FSInputFile(image_path),
-        caption=f"🎴 {card[1]}\n\n📊 1 / {len(cards)}",
-        reply_markup=keyboard
+        FSInputFile(path),
+        caption=f"🎴 {card[1]}\n1 / {len(cards)}",
+        reply_markup=kb
     )
 
 
 # =========================
-# NEXT
+# NAVIGATION NEXT
 # =========================
 
-@dp.callback_query(F.data.startswith("inv_next_"))
-async def inv_next(callback: CallbackQuery):
+@dp.callback_query(F.data.startswith("next_"))
+async def next_card(cb: CallbackQuery):
 
-    uid = callback.from_user.id
+    uid = cb.from_user.id
+    cards = inv_states.get(uid)
 
-    if uid not in inv_states:
-        await callback.answer("منقضی شد")
+    if not cards:
+        await cb.answer()
         return
 
-    cards = inv_states[uid]
-    index = int(callback.data.split("_")[-1]) + 1
-
+    index = inv_index[uid] + 1
     if index >= len(cards):
         index = 0
 
     inv_index[uid] = index
     card = cards[index]
 
-    image_path = os.path.join(BASE_PATH, card[2])
+    path = os.path.join(BASE_PATH, card[2])
 
-    keyboard = InlineKeyboardMarkup(
+    kb = InlineKeyboardMarkup(
         inline_keyboard=[
             [
-                InlineKeyboardButton(text="⬅️", callback_data=f"inv_prev_{index}"),
-                InlineKeyboardButton(text="➡️", callback_data=f"inv_next_{index}")
+                InlineKeyboardButton(text="⬅️", callback_data=f"prev_{index}"),
+                InlineKeyboardButton(text="➡️", callback_data=f"next_{index}")
             ],
             [
-                InlineKeyboardButton(text="🗑 فروش", callback_data="inv_sell"),
-                InlineKeyboardButton(text="🎁 انتقال", callback_data="inv_trade")
+                InlineKeyboardButton(text="🗑 فروش", callback_data="sell"),
+                InlineKeyboardButton(text="🎁 انتقال", callback_data="trade")
             ]
         ]
     )
 
-    await callback.message.delete()
-
-    await callback.message.answer_photo(
-        FSInputFile(image_path),
-        caption=f"🎴 {card[1]}\n\n📊 {index+1} / {len(cards)}",
-        reply_markup=keyboard
+    await cb.message.delete()
+    await cb.message.answer_photo(
+        FSInputFile(path),
+        caption=f"🎴 {card[1]}\n{index+1} / {len(cards)}",
+        reply_markup=kb
     )
 
-    await callback.answer()
+    await cb.answer()
 
 
 # =========================
-# PREV
+# NAVIGATION PREV
 # =========================
 
-@dp.callback_query(F.data.startswith("inv_prev_"))
-async def inv_prev(callback: CallbackQuery):
+@dp.callback_query(F.data.startswith("prev_"))
+async def prev_card(cb: CallbackQuery):
 
-    uid = callback.from_user.id
+    uid = cb.from_user.id
+    cards = inv_states.get(uid)
 
-    if uid not in inv_states:
-        await callback.answer("منقضی شد")
+    if not cards:
+        await cb.answer()
         return
 
-    cards = inv_states[uid]
-    index = int(callback.data.split("_")[-1]) - 1
-
+    index = inv_index[uid] - 1
     if index < 0:
         index = len(cards) - 1
 
     inv_index[uid] = index
     card = cards[index]
 
-    image_path = os.path.join(BASE_PATH, card[2])
+    path = os.path.join(BASE_PATH, card[2])
 
-    keyboard = InlineKeyboardMarkup(
+    kb = InlineKeyboardMarkup(
         inline_keyboard=[
             [
-                InlineKeyboardButton(text="⬅️", callback_data=f"inv_prev_{index}"),
-                InlineKeyboardButton(text="➡️", callback_data=f"inv_next_{index}")
+                InlineKeyboardButton(text="⬅️", callback_data=f"prev_{index}"),
+                InlineKeyboardButton(text="➡️", callback_data=f"next_{index}")
             ],
             [
-                InlineKeyboardButton(text="🗑 فروش", callback_data="inv_sell"),
-                InlineKeyboardButton(text="🎁 انتقال", callback_data="inv_trade")
+                InlineKeyboardButton(text="🗑 فروش", callback_data="sell"),
+                InlineKeyboardButton(text="🎁 انتقال", callback_data="trade")
             ]
         ]
     )
 
-    await callback.message.delete()
-
-    await callback.message.answer_photo(
-        FSInputFile(image_path),
-        caption=f"🎴 {card[1]}\n\n📊 {index+1} / {len(cards)}",
-        reply_markup=keyboard
+    await cb.message.delete()
+    await cb.message.answer_photo(
+        FSInputFile(path),
+        caption=f"🎴 {card[1]}\n{index+1} / {len(cards)}",
+        reply_markup=kb
     )
 
-    await callback.answer()
+    await cb.answer()
 
 
 # =========================
 # SELL
 # =========================
 
-@dp.callback_query(F.data == "inv_sell")
-async def inv_sell(callback: CallbackQuery):
+@dp.callback_query(F.data == "sell")
+async def sell(cb: CallbackQuery):
 
-    uid = callback.from_user.id
-
+    uid = cb.from_user.id
     cards = inv_states.get(uid)
+
     if not cards:
-        await callback.answer("منقضی شد")
         return
 
     index = inv_index.get(uid, 0)
     card = cards[index]
 
-    sell_states[uid] = {
-        "step": "price",
-        "card_name": card[1]
-    }
+    sell_states[uid] = {"step": "price", "card_name": card[1]}
 
-    await callback.message.answer(
-        f"🗑 فروش کارت:\n🎴 {card[1]}\n💰 قیمت را وارد کن:"
-    )
-
-    await callback.answer()
+    await cb.message.answer("💰 قیمت فروش؟")
+    await cb.answer()
 
 
 # =========================
 # TRADE
 # =========================
 
-@dp.callback_query(F.data == "inv_trade")
-async def inv_trade(callback: CallbackQuery):
+@dp.callback_query(F.data == "trade")
+async def trade(cb: CallbackQuery):
 
-    uid = callback.from_user.id
-
+    uid = cb.from_user.id
     cards = inv_states.get(uid)
+
     if not cards:
-        await callback.answer("منقضی شد")
         return
 
     index = inv_index.get(uid, 0)
     card = cards[index]
 
-    trade_states[uid] = {
-        "step": "buyer",
-        "card_name": card[1]
-    }
+    trade_states[uid] = {"step": "buyer", "card_name": card[1]}
 
-    await callback.message.answer(
-        f"🎁 انتقال کارت:\n🎴 {card[1]}\n👤 ID خریدار را وارد کن:"
-    )
-
-    await callback.answer()
+    await cb.message.answer("👤 ID خریدار؟")
+    await cb.answer()
 
 
 # =========================
-# MESSAGE FLOW (SAFE)
+# LUCK (NEW)
+# =========================
+
+@dp.message(Command("luck"))
+async def luck(message: Message):
+
+    uid = message.from_user.id
+    register_user(uid)
+
+    now = int(time.time())
+    last = get_last_luck(uid)
+
+    if now - last < 3600:
+        remain = 3600 - (now - last)
+        await message.answer(f"⏳ صبر کن {remain//60} دقیقه")
+        return
+
+    reward = random.randint(100, 200)
+
+    add_points(uid, reward)
+    set_last_luck(uid, now)
+
+    await message.answer(
+        f"""
+🍀 شانس!
+
+🎁 +{reward}
+💰 {get_points(uid)}
+"""
+    )
+
+
+# =========================
+# MESSAGE FLOW
 # =========================
 
 @dp.message()
-async def handle_all(message: Message):
+async def handler(message: Message):
 
     uid = message.from_user.id
     text = message.text or ""
@@ -342,17 +368,14 @@ async def handle_all(message: Message):
     # SELL
     if uid in sell_states:
 
-        state = sell_states[uid]
-
-        if state["step"] == "price":
-
+        if sell_states[uid]["step"] == "price":
             try:
                 price = int(text)
             except:
-                await message.answer("❌ فقط عدد")
+                await message.answer("❌ عدد")
                 return
 
-            sell_card(uid, state["card_name"], price)
+            sell_card(uid, sell_states[uid]["card_name"], price)
             del sell_states[uid]
 
             await message.answer("✅ فروخته شد")
@@ -361,48 +384,35 @@ async def handle_all(message: Message):
     # TRADE
     if uid in trade_states:
 
-        state = trade_states[uid]
+        st = trade_states[uid]
 
-        if state["step"] == "buyer":
-
-            try:
-                state["buyer"] = int(text)
-            except:
-                await message.answer("❌ ID اشتباه")
-                return
-
-            state["step"] = "card"
-            await message.answer("🎴 نام کارت را وارد کن:")
+        if st["step"] == "buyer":
+            st["buyer"] = int(text)
+            st["step"] = "card"
+            await message.answer("🎴 نام کارت")
             return
 
-        if state["step"] == "card":
-
-            state["card_name"] = text
-            state["step"] = "price"
-
-            await message.answer("💰 قیمت؟")
+        if st["step"] == "card":
+            st["card_name"] = text
+            st["step"] = "price"
+            await message.answer("💰 قیمت")
             return
 
-        if state["step"] == "price":
+        if st["step"] == "price":
 
-            try:
-                price = int(text)
-            except:
-                await message.answer("❌ قیمت اشتباه")
-                return
-
-            buyer = state["buyer"]
+            price = int(text)
+            buyer = st["buyer"]
 
             if get_points(buyer) < price:
                 del trade_states[uid]
-                await message.answer("❌ پول کافی نیست")
+                await message.answer("❌ پول کم")
                 return
 
-            card = get_card_by_name(uid, state["card_name"])
+            card = get_card_by_name(uid, st["card_name"])
 
             if not card:
                 del trade_states[uid]
-                await message.answer("❌ کارت پیدا نشد")
+                await message.answer("❌ کارت نیست")
                 return
 
             remove_points(buyer, price)
@@ -421,7 +431,7 @@ async def handle_all(message: Message):
 
 async def main():
     init_db()
-    print("Bot is running...")
+    print("BOT RUNNING")
     await dp.start_polling(bot)
 
 
