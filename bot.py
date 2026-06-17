@@ -3,13 +3,12 @@ import random
 import os
 import time
 
-from aiogram import Bot, Dispatcher
-from aiogram.types import Message, FSInputFile
+from aiogram import Bot, Dispatcher, F
+from aiogram.types import Message, FSInputFile, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.filters import Command
 
 from db import *
-
-from cards import CARDS, BASE_PATH
+from cards import CARDS
 
 
 TOKEN = os.getenv("TOKEN")
@@ -24,16 +23,21 @@ dp = Dispatcher()
 @dp.message(Command("start"))
 async def start(message: Message):
 
-    user_id = message.from_user.id
-    points = register_user(user_id)
+    uid = message.from_user.id
+    points = register_user(uid)
 
     if points is None:
-        points = get_points(user_id)
+        points = get_points(uid)
+
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🎴 خرید پک", callback_data="shop")],
+        [InlineKeyboardButton(text="📦 کارت‌ها", callback_data="inv")],
+        [InlineKeyboardButton(text="🎰 شانس", callback_data="chans")]
+    ])
 
     await message.answer(
-        f"🎴 TCG JJK Bot\n\n"
-        f"💰 امتیاز: {points}\n"
-        f"📖 /help"
+        f"🎴 Welcome to JJK TCG!\n\n💰 امتیاز: {points}\n\n🔥 انتخاب کن:",
+        reply_markup=keyboard
     )
 
 
@@ -45,13 +49,14 @@ async def help_cmd(message: Message):
 
     await message.answer(
         "📖 دستورات:\n\n"
-        "/points\n"
-        "/TCG_shop\n"
-        "/TCG_Open\n"
-        "/TCG_inv\n"
-        "/sell\n"
-        "/trade\n"
-        "/chans"
+        "/start - شروع بازی\n"
+        "/points - امتیاز\n"
+        "/shop - خرید پک 30 امتیازی\n"
+        "/open - باز کردن کارت\n"
+        "/inv - اینونتوری\n"
+        "/sell name price - فروش کارت\n"
+        "/trade user card price\n"
+        "/chans - شانس 1 ساعته"
     )
 
 
@@ -61,18 +66,20 @@ async def help_cmd(message: Message):
 @dp.message(Command("points"))
 async def points(message: Message):
 
-    await message.answer(f"💰 {get_points(message.from_user.id)}")
+    await message.answer(f"💰 امتیاز شما: {get_points(message.from_user.id)}")
 
 
 # =========================
-# SHOP
+# SHOP (COMMAND + BUTTON)
 # =========================
-@dp.message(Command("TCG_shop"))
-async def shop(message: Message):
+@dp.message(Command("shop"))
+@dp.callback_query(F.data == "shop")
+async def shop(event):
 
-    uid = message.from_user.id
+    uid = event.from_user.id if isinstance(event, Message) else event.message.chat.id
+
     if get_points(uid) < 30:
-        await message.answer("❌ امتیاز کافی نیست")
+        await bot.send_message(uid, "❌ امتیاز کافی نیست")
         return
 
     remove_points(uid, 30)
@@ -82,51 +89,66 @@ async def shop(message: Message):
     for name, img in pack:
         add_unopened_card(uid, name, img)
 
-    await message.answer("📦 پک خریدی!")
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🎴 باز کردن کارت", callback_data="open")]
+    ])
+
+    await bot.send_message(
+        uid,
+        "📦 پک خریداری شد!\n🎴 حالا کارت‌ها را باز کن",
+        reply_markup=keyboard
+    )
 
 
 # =========================
-# OPEN
+# OPEN CARD
 # =========================
-@dp.message(Command("TCG_Open"))
-async def open_card(message: Message):
+@dp.message(Command("open"))
+@dp.callback_query(F.data == "open")
+async def open_card(event):
 
-    card = get_next_unopened(message.from_user.id)
+    uid = event.from_user.id if isinstance(event, Message) else event.message.chat.id
+
+    card = get_next_unopened(uid)
 
     if not card:
-        await message.answer("📦 چیزی نداری")
+        await bot.send_message(uid, "📦 کارت نداری")
         return
 
     cid, _, name, img = card
 
     try:
-        photo = FSInputFile(os.path.join(BASE_PATH, img))
-        await message.answer_photo(photo, caption=name)
+        photo = FSInputFile(img)
+        await bot.send_photo(uid, photo, caption=f"🎴 {name}")
     except:
-        await message.answer(name)
+        await bot.send_message(uid, f"🎴 {name}")
 
     move_card_to_inventory(cid)
 
-    await message.answer(f"📦 باقی: {unopened_count(message.from_user.id)}")
+    await bot.send_message(uid, f"📦 باقی: {unopened_count(uid)}")
 
 
 # =========================
 # INVENTORY
 # =========================
-@dp.message(Command("TCG_inv"))
-async def inv(message: Message):
+@dp.message(Command("inv"))
+@dp.callback_query(F.data == "inv")
+async def inv(event):
 
-    cards = get_inventory(message.from_user.id)
+    uid = event.from_user.id if isinstance(event, Message) else event.message.chat.id
+
+    cards = get_inventory(uid)
 
     if not cards:
-        await message.answer("خالیه")
+        await bot.send_message(uid, "📦 خالیه")
         return
 
-    text = "🎴:\n"
+    text = "🎴 کارت‌های شما:\n\n"
+
     for i, c in enumerate(cards, 1):
         text += f"{i}. {c[0]}\n"
 
-    await message.answer(text)
+    await bot.send_message(uid, text)
 
 
 # =========================
@@ -136,8 +158,9 @@ async def inv(message: Message):
 async def sell(message: Message):
 
     args = message.text.split()
+
     if len(args) < 3:
-        await message.answer("/sell name price")
+        await message.answer("❌ /sell name price")
         return
 
     name = " ".join(args[1:-1])
@@ -145,7 +168,7 @@ async def sell(message: Message):
 
     sell_card(message.from_user.id, name, price)
 
-    await message.answer("💰 فروخته شد")
+    await message.answer(f"💰 فروخته شد {price}")
 
 
 # =========================
@@ -157,7 +180,7 @@ async def trade(message: Message):
     args = message.text.split()
 
     if len(args) < 4:
-        await message.answer("/trade user_id card price")
+        await message.answer("❌ /trade user card price")
         return
 
     target = int(args[1])
@@ -179,11 +202,11 @@ async def trade(message: Message):
 
     transfer_card(card_id, seller, target)
 
-    await message.answer("✅ معامله شد")
+    await message.answer("✅ معامله انجام شد")
 
 
 # =========================
-# CHANS
+# CHANS (HYPE VERSION)
 # =========================
 @dp.message(Command("chans"))
 async def chans(message: Message):
@@ -194,7 +217,8 @@ async def chans(message: Message):
     last = get_last_chans(uid)
 
     if now - last < 3600:
-        await message.answer("⏳ هر 1 ساعت یکبار")
+        remain = 3600 - (now - last)
+        await message.answer(f"⏳ هنوز {remain//60} دقیقه مونده")
         return
 
     reward = random.randint(100, 300)
@@ -202,7 +226,27 @@ async def chans(message: Message):
     add_points(uid, reward)
     set_last_chans(uid, now)
 
-    await message.answer(f"🎉 +{reward}")
+    await message.answer(
+        f"🎰 CHANCE ACTIVATED!\n\n"
+        f"💰 +{reward} coins\n"
+        f"🔥 شانس امروزت فعال شد!"
+    )
+
+
+# =========================
+# CALLBACKS FIX
+# =========================
+@dp.callback_query()
+async def callbacks(call):
+
+    if call.data == "shop":
+        await shop(call.message)
+
+    elif call.data == "open":
+        await open_card(call.message)
+
+    elif call.data == "inv":
+        await inv(call.message)
 
 
 # =========================
